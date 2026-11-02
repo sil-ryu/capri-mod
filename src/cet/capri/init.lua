@@ -1,5 +1,6 @@
 local Abilities = require("modules/abilities")
 local Config = require("modules/config")
+local Deck = require("modules/deck")
 local Effects = require("modules/effects")
 local Targeting = require("modules/targeting")
 local UI = require("modules/ui")
@@ -16,6 +17,7 @@ end)
 
 registerForEvent("onUpdate", function(dt)
     Util.safe("update", Abilities.update, cfg, dt)
+    Util.safe("deck", Deck.update, cfg, dt)
 end)
 
 registerForEvent("onOverlayOpen", function() overlayOpen = true end)
@@ -70,6 +72,10 @@ registerHotkey("capri_mark", "Mark / unmark target", withPlayer("mark", Targetin
 registerHotkey("capri_clear_marks", "Clear marked targets", Targeting.clearMarks)
 
 registerHotkey("capri_inspect", "Inspect target (debug)", withPlayer("inspect", Targeting.inspect))
+
+registerHotkey("capri_blackout", "Toggle city blackout", function() Abilities.blackout() end)
+
+registerHotkey("capri_down_av", "Down aircraft (crosshair + tagged)", function() Abilities.downAircraft() end)
 
 registerHotkey("capri_aura", "Toggle Blackwall aura", function()
     cfg.auraEnabled = not cfg.auraEnabled

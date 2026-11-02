@@ -6,7 +6,7 @@ Targeting.modes = {
     "Hostiles only",
     "Burn the City - everyone",
     "Selected groups",
-    "Marked targets",
+    "Tagged targets (scanner tag)",
 }
 
 Targeting.groups = {
@@ -25,8 +25,6 @@ local AFFILIATIONS = {
     { "corpo", { "Arasaka", "Militech", "KangTao", "NetWatch", "Biotechnica", "Petrochem", "FIA" } },
     { "civilian", { "Civilian", "Unaffiliated" } },
 }
-
-local marks = {}  -- entity key -> EntityID
 
 local function affiliationName(npc)
     local record = TweakDBInterface.GetCharacterRecord(npc:GetRecordID())
@@ -60,7 +58,7 @@ function Targeting.filter(cfg)
     elseif cfg.targetMode == 3 then
         return function(npc) return cfg.groups[(Targeting.classify(npc))] == true end
     elseif cfg.targetMode == 4 then
-        return function(npc) return marks[Util.key(npc)] ~= nil end
+        return function(npc) return npc:IsTaggedinFocusMode() end
     end
     return function(npc) return npc:IsHostile() end
 end
@@ -75,16 +73,19 @@ local function lookAtNpc(player)
     if target and target:IsNPC() and not target:IsDead() then return target end
 end
 
--- Drops marks whose NPC died or despawned, returns how many remain.
+-- "Tagged" uses the scanner's own tags (middle mouse in scan mode), shared with the deck.
+local function taggedObjects()
+    local board = Game.GetBlackboardSystem():Get(GetAllBlackboardDefs().TaggedObjectsList)
+    local ok, list = pcall(function()
+        return FromVariant(board:GetVariant(GetAllBlackboardDefs().TaggedObjectsList.taggedObjectsList))
+    end)
+    return (ok and type(list) == "table") and list or {}
+end
+
 function Targeting.markCount()
     local count = 0
-    for key, id in pairs(marks) do
-        local entity = Game.FindEntityByID(id)
-        if entity == nil or entity:IsDead() then
-            marks[key] = nil
-        else
-            count = count + 1
-        end
+    for _, object in ipairs(taggedObjects()) do
+        if object and object:IsNPC() and not object:IsDead() then count = count + 1 end
     end
     return count
 end
@@ -95,14 +96,19 @@ function Targeting.toggleMark(player)
         Util.notify("No target under crosshair")
         return
     end
-    local key = Util.key(target)
-    marks[key] = not marks[key] and target:GetEntityID() or nil
-    Util.notify(("%s %s // %d marked"):format(marks[key] and "Marked" or "Unmarked", displayName(target), Targeting.markCount()))
+    local tagged = target:IsTaggedinFocusMode()
+    if tagged then GameObject.UntagObject(target) else GameObject.TagObject(target) end
+    Util.notify(("%s %s"):format(tagged and "Untagged" or "Tagged", displayName(target)))
 end
 
 function Targeting.clearMarks()
-    marks = {}
-    Util.notify("Marks cleared")
+    -- Untagging edits the game's list, so walk a copy.
+    local objects = {}
+    for i, object in ipairs(taggedObjects()) do objects[i] = object end
+    for _, object in ipairs(objects) do
+        if object and object:IsNPC() then GameObject.UntagObject(object) end
+    end
+    Util.notify("Tags cleared")
 end
 
 -- Debug helper: shows how the NPC under the crosshair is classified.

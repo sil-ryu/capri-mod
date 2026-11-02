@@ -1,2 +1,4 @@
 .venv
 art
+research/*.json
+research/game_scripts/

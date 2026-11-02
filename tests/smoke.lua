@@ -30,6 +30,7 @@ local function newEntity(name, pos, opts)
         IsNPC = function() return opts.npc ~= false end,
         IsDead = function() return opts.dead == true end,
         IsHostile = function() return opts.hostile == true end,
+        IsTaggedinFocusMode = function() return opts.tagged == true end,
         Kill = function(self) table.insert(killed, self.name) end,
         SetWarningMessage = function(_, text) table.insert(hud, text) end,
     }
@@ -99,6 +100,27 @@ Game = setmetatable({
     end,
 }, { __index = function(_, k) if k == "TSQ_ALL;" then return function() return {} end end end })
 
+-- Scanner tags: the game keeps tagged objects in a blackboard list.
+local taggedList = {}
+Game.GetBlackboardSystem = function()
+    return { Get = function() return { GetVariant = function() return taggedList end } end }
+end
+Game.GetScriptableSystemsContainer = function() return { Get = function() return nil end } end
+GetAllBlackboardDefs = function() return { TaggedObjectsList = { taggedObjectsList = "list" } } end
+FromVariant = function(value) return value end
+GameObject = {
+    TagObject = function(entity)
+        entity.opts.tagged = true
+        table.insert(taggedList, entity)
+    end,
+    UntagObject = function(entity)
+        entity.opts.tagged = false
+        for i, e in ipairs(taggedList) do
+            if e == entity then table.remove(taggedList, i) break end
+        end
+    end,
+}
+
 Vector4 = {
     Distance = function(a, b)
         return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 + (a.z - b.z) ^ 2)
@@ -145,7 +167,9 @@ ImGui = {
     Checkbox = function(_, v) return v, false end,
     Combo = function(_, i) return i, false end,
     SliderFloat = function(_, v) return v, false end,
+    SliderInt = function(_, v) return v, false end,
     Button = function() return false end,
+    SameLine = function() end,
 }
 
 -- Capture the mod's console output instead of printing it.
@@ -198,28 +222,28 @@ check(Targeting.classify(thug) == "gang", "hostile unaffiliated NPC counts as ga
 local unknown = newEntity("unknown", vec(0, 3, 0), {})
 check(Targeting.classify(unknown) == "civilian", "NPC with unreadable affiliation falls back on hostility")
 
--- Marked targets
+-- Tagged targets (scanner tags)
 cfg.targetMode = 4
 lookAt = world[3] -- civilian_front
 hotkeys.capri_mark()
 lookAt = world[4] -- cop_front
 hotkeys.capri_mark()
-check(Targeting.markCount() == 2, "marking two NPCs under the crosshair")
+check(Targeting.markCount() == 2, "tagging two NPCs under the crosshair")
 reset()
 hotkeys.capri_multihack()
-check(names(applied) == "civilian_front:Electrocuted,cop_front:Electrocuted", "Marked targets: only marked NPCs are hit")
+check(names(applied) == "civilian_front:Electrocuted,cop_front:Electrocuted", "Tagged targets: only tagged NPCs are hit")
 
 hotkeys.capri_mark() -- cop_front again
-check(Targeting.markCount() == 1, "marking the same NPC again unmarks it")
+check(Targeting.markCount() == 1, "tagging the same NPC again untags it")
 
 world[3].opts.dead = true
-check(Targeting.markCount() == 0, "dead marked NPCs are dropped")
+check(Targeting.markCount() == 0, "dead tagged NPCs are not counted")
 world[3].opts.dead = false
 
 lookAt = world[6] -- dead ganger
 reset()
 hotkeys.capri_mark()
-check(Targeting.markCount() == 0 and hud[1] == "No target under crosshair", "can't mark a dead NPC")
+check(Targeting.markCount() == 1 and hud[1] == "No target under crosshair", "can't tag a dead NPC")
 
 lookAt = world[4]
 reset()
@@ -228,7 +252,7 @@ check(hud[1] and hud[1]:find("police | Factions.NCPD") ~= nil, "inspect shows gr
 
 hotkeys.capri_mark()
 hotkeys.capri_clear_marks()
-check(Targeting.markCount() == 0, "clear marks")
+check(Targeting.markCount() == 0, "clear tags")
 
 cfg.targetMode = 1
 
@@ -247,7 +271,11 @@ check(hud[#hud]:find("Overload") ~= nil, "hack mode cycles back to Overload")
 for _ = 1, 4 do hotkeys.capri_target_mode() end
 check(cfg.targetMode == 1, "targeting mode cycles back to Hostiles only")
 
--- Aura: first tick shocks, re-hit blocked for 2s, allowed after.
+-- Aura is off by default (player switches it on); first tick shocks, re-hit blocked for 2s, allowed after.
+reset()
+events.onUpdate(0.5)
+check(names(applied) == "", "aura is off by default")
+cfg.auraEnabled = true
 reset()
 events.onUpdate(0.5)
 local first = names(applied)
@@ -287,6 +315,51 @@ for mode = 1, 4 do
     UI.draw(cfg)
 end
 check(cfg.hackMode == 2 and cfg.targetMode == 4, "UI round-trips hack and targeting mode indexes")
+
+-- City abilities run in the deck's scripts; without them the player is told to restart.
+reset()
+hotkeys.capri_blackout()
+hotkeys.capri_down_av()
+check(hud[1] and hud[1]:find("restart") ~= nil and hud[2] and hud[2]:find("restart") ~= nil, "city abilities ask for a restart when the deck scripts are missing")
+
+local fakeDeck = { blackout = false, downed = 2, synced = nil }
+function fakeDeck:ToggleBlackout() self.blackout = not self.blackout return self.blackout end
+function fakeDeck:IsBlackout() return self.blackout end
+function fakeDeck:DownAircraft() return self.downed end
+function fakeDeck:DeckEquipped() return true end
+function fakeDeck:SetTargeting(mode, gang) self.synced = { mode = mode, gang = gang } end
+function fakeDeck:SetSpread() end
+function fakeDeck:SetPassives(_, _, _, empRange) self.empRange = empRange end
+function fakeDeck:SetAura(on) self.aura = on end
+function fakeDeck:IsAuraOn() return self.aura end
+Game.GetScriptableSystemsContainer = function() return { Get = function() return fakeDeck end } end
+
+reset()
+hotkeys.capri_blackout()
+check(fakeDeck.blackout and hud[1]:find("offline") ~= nil, "blackout hotkey cuts the city grid")
+hotkeys.capri_blackout()
+check(not fakeDeck.blackout and hud[2]:find("online") ~= nil, "blackout hotkey again restores it")
+hotkeys.capri_down_av()
+check(hud[3] == "Aircraft down // 2", "down-aircraft reports how many went down")
+fakeDeck.downed = 0
+hotkeys.capri_down_av()
+check(hud[4]:find("No aircraft") ~= nil, "down-aircraft explains when nothing is targeted")
+
+cfg.targetMode = 3
+cfg.groups.gang = true
+events.onUpdate(1.0)
+check(fakeDeck.synced and fakeDeck.synced.mode == 2 and fakeDeck.synced.gang == true, "overlay targeting is pushed to the deck (0-based mode)")
+check(fakeDeck.empRange == cfg.empRange, "EMP radius is pushed to the deck")
+
+cfg.auraEnabled = false
+events.onUpdate(1.0)
+fakeDeck.aura = true -- player used the Blackwall Aura quickhack
+events.onUpdate(1.0)
+check(cfg.auraEnabled == true, "overlay follows an aura switched by the deck's quickhack")
+cfg.auraEnabled = false -- player unticks it in the overlay
+events.onUpdate(1.0)
+check(fakeDeck.aura == false, "overlay aura change is pushed to the deck")
+Game.GetScriptableSystemsContainer = function() return { Get = function() return nil end } end
 
 -- No player (main menu) must not crash
 Game.GetPlayer = function() return nil end

@@ -1,3 +1,4 @@
+local Deck = require("modules/deck")
 local Effects = require("modules/effects")
 local Targeting = require("modules/targeting")
 local Targets = require("modules/targets")
@@ -58,6 +59,30 @@ function Abilities.empShockwave(cfg)
     Util.notify(("EMP shockwave // %d targets"):format(#targets))
 end
 
+local DECK_MISSING = "Capri's deck scripts aren't loaded - restart the game"
+
+-- #1: city grid blackout, run by the cyberdeck scripts.
+function Abilities.blackout()
+    local on = Deck.toggleBlackout()
+    if on == nil then
+        Util.notify(DECK_MISSING)
+    else
+        Util.notify(on and "Blackout // city grid offline" or "Blackout lifted // city grid online")
+    end
+end
+
+-- #7: aircraft under the crosshair plus every tagged one go down.
+function Abilities.downAircraft()
+    local count = Deck.downAircraft()
+    if count == nil then
+        Util.notify(DECK_MISSING)
+    elseif count == 0 then
+        Util.notify("No aircraft - aim at one or tag them with the scanner")
+    else
+        Util.notify(("Aircraft down // %d"):format(count))
+    end
+end
+
 -- #10: shock anyone who steps inside the threat bubble.
 local function aura(cfg, player)
     for key, t in pairs(auraHits) do
@@ -96,7 +121,10 @@ function Abilities.update(cfg, dt)
     if not player then return end
     clock = clock + dt
 
-    if cfg.auraEnabled then
+    -- With the cyberdeck installed, its own aura and regeneration run on these settings.
+    local deckRuns = Deck.equipped()
+
+    if cfg.auraEnabled and not deckRuns then
         auraTimer = auraTimer + dt
         if auraTimer >= cfg.auraInterval then
             auraTimer = 0
@@ -107,7 +135,7 @@ function Abilities.update(cfg, dt)
     vitalsTimer = vitalsTimer + dt
     if vitalsTimer >= VITALS_TICK then
         vitalsTimer = 0
-        if cfg.regenEnabled then Util.safe("regen", regen, cfg, player) end
+        if cfg.regenEnabled and not deckRuns then Util.safe("regen", regen, cfg, player) end
         if cfg.infiniteRam then Util.safe("ram", refillRam, player) end
     end
 end

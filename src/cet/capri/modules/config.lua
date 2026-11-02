@@ -9,12 +9,14 @@ Config.defaults = {
     scanRange = 50.0,
     screenOnly = true,
     empRange = 25.0,
-    auraEnabled = true,
+    auraEnabled = false,
     auraRange = 30.0,
     auraInterval = 0.5,
     regenEnabled = true,
     regenPerSecond = 8.0,  -- percent of max health
     infiniteRam = true,
+    -- Capri's cyberdeck only (see modules/deck.lua).
+    deck = { spreadEnabled = true, spreadRange = 50.0, maxTargets = 30, hackAnyone = true, carSpreadTagged = true },
 }
 
 local function copy(value)
